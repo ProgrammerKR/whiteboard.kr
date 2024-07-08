@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web-based Whiteboard</title>
+    <style>
+        body {
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            overflow: hidden; /* Prevent scrolling */
+        }
+
+        .toolbar {
+            display: flex;
+            justify-content: space-around;
+            background-color: #f0f0f0;
+            padding: 10px;
+            flex-wrap: wrap; /* Wrap buttons on smaller screens */
+        }
+
+        canvas {
+            flex-grow: 1;
+            border: 1px solid #000;
+            touch-action: none; /* Prevent default touch actions */
+        }
+    </style>
+</head>
+<body>
+    <div class="toolbar">
+        <button id="clear">Clear</button>
+        <button id="erase">Erase</button>
+        <input type="color" id="colorPicker" value="#000000">
+        <button id="save">Save</button>
+        <label for="penSize">Pen Size:</label>
+        <select id="penSize">
+            <option value="2">2px</option>
+            <option value="5" selected>5px</option>
+            <option value="10">10px</option>
+            <option value="20">20px</option>
+        </select>
+        <label for="bgColorPicker">Background Color:</label>
+        <input type="color" id="bgColorPicker" value="#ffffff">
+        <button id="undo">Undo</button>
+        <label for="shapeSelector">Shape:</label>
+        <select id="shapeSelector">
+            <option value="none" selected>Free Draw</option>
+            <option value="line">Line</option>
+            <option value="rectangle">Rectangle</option>
+            <option value="circle">Circle</option>
+        </select>
+    </div>
+    <canvas id="whiteboard"></canvas>
+    <script>
+        const canvas = document.getElementById('whiteboard');
+        const ctx = canvas.getContext('2d');
+        const clearButton = document.getElementById('clear');
+        const eraseButton = document.getElementById('erase');
+        const colorPicker = document.getElementById('colorPicker');
+        const saveButton = document.getElementById('save');
+        const penSize = document.getElementById('penSize');
+        const bgColorPicker = document.getElementById('bgColorPicker');
+        const undoButton = document.getElementById('undo');
+        const shapeSelector = document.getElementById('shapeSelector');
+
+        let drawing = false;
+        let erasing = false;
+        let color = '#000000';
+        let lineWidth = 5;
+        let bgColor = '#ffffff';
+        let shape = 'none';
+        let startX, startY;
+
+        const history = [];
+
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight - document.querySelector('.toolbar').offsetHeight;
+            clearCanvas(); // Maintain background color on resize
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        canvas.addEventListener('mousedown', startDrawing);
+        canvas.addEventListener('mouseup', stopDrawing);
+        canvas.addEventListener('mousemove', draw);
+
+        canvas.addEventListener('touchstart', startDrawing);
+        canvas.addEventListener('touchend', stopDrawing);
+        canvas.addEventListener('touchmove', draw);
+
+        clearButton.addEventListener('click', clearCanvas);
+        eraseButton.addEventListener('click', () => erasing = !erasing);
+        colorPicker.addEventListener('input', (e) => color = e.target.value);
+        penSize.addEventListener('change', (e) => lineWidth = e.target.value);
+        bgColorPicker.addEventListener('input', changeBackgroundColor);
+        undoButton.addEventListener('click', undo);
+        shapeSelector.addEventListener('change', (e) => shape = e.target.value);
+        saveButton.addEventListener('click', saveCanvas);
+
+        function startDrawing(e) {
+            drawing = true;
+            saveState();
+            const rect = canvas.getBoundingClientRect();
+            startX = (e.clientX || e.touches[0].clientX) - rect.left;
+            startY = (e.clientY || e.touches[0].clientY) - rect.top;
+            draw(e); // Ensure to draw a point if touched but not moved
+        }
+
+        function stopDrawing() {
+            drawing = false;
+            ctx.beginPath(); // Reset the path so lines don't connect
+        }
+
+        function draw(e) {
+            if (!drawing) return;
+
+            e.preventDefault(); // Prevent scrolling on touch devices
+
+            const rect = canvas.getBoundingClientRect();
+            const x = (e.clientX || e.touches[0].clientX) - rect.left;
+            const y = (e.clientY || e.touches[0].clientY) - rect.top;
+
+            ctx.lineWidth = lineWidth;
+            ctx.lineCap = 'round';
+            ctx.strokeStyle = erasing ? '#ffffff' : color;
+
+            if (shape === 'none') {
+                ctx.lineTo(x, y);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(x, y);
+            } else {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                restoreState();
+                drawShape(startX, startY, x, y);
+            }
+        }
+
+        function drawShape(startX, startY, endX, endY) {
+            ctx.beginPath();
+            switch (shape) {
+                case 'line':
+                    ctx.moveTo(startX, startY);
+                    ctx.lineTo(endX, endY);
+                    break;
+                case 'rectangle':
+                    ctx.rect(startX, startY, endX - startX, endY - startY);
+                    break;
+                case 'circle':
+                    const radius = Math.sqrt(Math.pow(endX - startX, 2) + Math.pow(endY - startY, 2));
+                    ctx.arc(startX, startY, radius, 0, 2 * Math.PI);
+                    break;
+            }
+            ctx.stroke();
+        }
+
+        function clearCanvas() {
+            ctx.fillStyle = bgColor;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            saveState(); // Save state after clearing
+        }
+
+        function changeBackgroundColor(e) {
+            bgColor = e.target.value;
+            clearCanvas();
+        }
+
+        function saveCanvas() {
+            const link = document.createElement('a');
+            link.download = 'whiteboard.png';
+            link.href = canvas.toDataURL();
+            link.click();
+        }
+
+        function saveState() {
+            history.push(canvas.toDataURL());
+        }
+
+        function restoreState() {
+            if (history.length > 0) {
+                const img = new Image();
+                img.src = history[history.length - 1];
+                img.onload = () => {
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    ctx.drawImage(img, 0, 0);
+                };
+            }
+        }
+
+        function undo() {
+            if (history.length > 0) {
+                history.pop();
+                restoreState();
+            }
+        }
+    </script>
+</body>
+</html>
